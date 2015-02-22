@@ -1,0 +1,127 @@
+---
+title: "Machine Learning Project"
+author: "Nasreddine MONTASSER"
+date: "Friday, February 20, 2015"
+output: html_document
+---
+
+Qualitative Activity Recognition
+----------------------------------------------------
+## 1. Presentaion
+In the present project we try to predict the manner in with exercices are done
+
+## 2. Loading and Cleaning Training and testing Datasets
+Load training and testing datasets from project directory.the first `pml-training.csv`contain 19622 observation of 160 variables. The second `pml-testing.csv`contain 20 observation of 160 variables. Then  clean the sets by supressing columns with "NA" .This leads to two new datasets: tab1 and tab 2 containing both 60 columns (variables).
+
+````{r, warning=FALSE}
+#Training Data Set
+############################################
+#loading data set from project directory
+tt1<-read.csv("pml-training.csv",header=TRUE)
+
+#eliminate columns with most entries are "NA"
+tt1cl<-tt1[, !is.na(colSums(tt1 != ""))]
+vec1<-apply(tt1cl,2, function(x) all(x != ""))
+q1<-which(vec1==FALSE)
+tab1<-tt1cl[,-q1]
+ncol(tab1)
+
+# Testing set
+############################################sy
+#loading data set from project directory
+tt2<-read.csv("pml-testing.csv",header=TRUE)
+
+#eliminate columns with most entries are "NA"
+tt2cl<-tt2[, !is.na(colSums(tt2 != ""))]
+vec2<-apply(tt2cl,2, function(x) all(x != ""))
+q2<-which(vec2==FALSE)
+tab2<-tt2cl
+ncol(tab2)
+````
+
+
+## 3. Data Partition - Cross Validation - Random Forest modeling
+
+### 3.1 Data Partition
+
+The initial training data set is divided in trainning and validating datasets
+```{r, warning=FALSE}
+library(caret)
+library(randomForest)
+
+#Changing column names
+colnames(tab1)<-as.vector(paste0("x", 1:60))
+
+#Data Partition
+set.seed(100)
+inTrain<-createDataPartition(y=tab1$x1,p=0.7,list=F)
+tab1train<-tab1[inTrain,]
+tab1valid<-tab1[-inTrain,]
+
+#making formula for random forest Model
+xnam <- paste0("x",6:59)
+fmla <- as.formula(paste("x60 ~ ", paste(xnam, collapse= "+")))
+```
+### 3.2 selecting most important features 
+
+we appay the randomForest function in the `randomForest` package in  a model with all predictors and then find the most importante predictors according the the Gini coefficients finded in the output of the `importance()` function in the package. we choose to use the 8 most important features to learn the random forest model.
+
+```{r,warning=FALSE}
+#Random forest for features selection
+model.rf<-randomForest(fmla, data=tab1train,importance=TRUE,ntree=100)
+imp<-round(importance(model.rf),2)
+imp<-imp[order(-imp[,7]),]
+sel_feat<-row.names(head(imp,8))
+
+````
+### 3.3 building predictive model 
+
+The predictive model is built using training dataset and cross validation with 10 foldsand 3 repeats. The random forest algorithm determines the model parameters.
+
+````{r,warning=FALSE}
+#Cross Validation with 3 folds 
+set.seed(101)
+fmla1 <- as.formula(paste("x60 ~ ", paste(sel_feat, collapse= "+")))
+
+#Learning model with Random Forest algorithm
+#modrforst<-train(fmla1,data=tab1train,method="rf")
+ctrl <- trainControl(method = "repeatedcv", repeats = 3)
+modrforst<-train(fmla1,data=tab1train,method="rf",trControl=ctrl)
+modrforst$finalModel
+print(modrforst)
+plot(modrforst,log="y",lwd=2,main="",xlab="Predictors",ylab="Accuracy")
+```
+
+### 3.3 Applying model to validation dataset
+```{r}
+modpred_val<-predict(modrforst,tab1valid)
+table(modpred_val,tab1valid$x60)
+```
+## 4. Applying model to testing set
+
+```{r,warning=FALSE}
+#Applying model to test data set
+colnames(tab2)<-as.vector(paste0("x", 1:60))
+modpred_test<-predict(modrforst,tab2)
+modpred_test
+```
+
+## 5. Out Of Sample error
+```{r,warning=FALSE}
+oos.error<-(1-sum(modpred_val==tab1valid$x60)/length(modpred_val))
+oos.error
+```
+the Out Of Sample error is about **`r round(oos.error*100,2)`%**
+
+##6. Write Up
+```{r,warning=FALSE}
+pml_write_files<-function(x){
+  n<-length(x)
+  for(i in 1:n){
+    filename<-paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(modpred_test)
+```
+
